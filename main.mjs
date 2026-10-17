@@ -11,7 +11,7 @@ let active=ENGINES[0],family='All',search='',playing=!matchMedia('(prefers-reduc
 const countText=(n)=>String(n).padStart(2,'0');
 let viewer=null;
 try{
-  viewer=createEngineViewer($('viewport'),{onSelect:id=>selectPart(id,false),onAngle:a=>{angle=a;const deg=Math.round(a*180/Math.PI)%720;$('crank-angle').value=deg;$('angle-output').textContent=`${String(deg).padStart(3,'0')}°`;updateMetrics()}});
+  viewer=createEngineViewer($('viewport'),{onSelect:id=>{partId=id||null;renderParts()},onAngle:a=>{angle=a;const deg=Math.round(a*180/Math.PI)%720;$('crank-angle').value=deg;$('angle-output').textContent=`${String(deg).padStart(3,'0')}°`;updateMetrics()}});
   $('scene-fallback').remove();
 }catch(e){$('scene-fallback').textContent=`3D unavailable: ${e.message}. Engine timeline and sources remain accessible.`;console.error(e)}
 function renderFamilies(){const f=$('families');f.innerHTML=FAMILIES.map(t=>`<button type="button" data-family="${safe(t)}" class="${t===family?'active':''}">${safe(t)}</button>`).join('');f.querySelectorAll('button').forEach(b=>b.onclick=()=>{family=b.dataset.family;renderFamilies();renderTimeline()});}
