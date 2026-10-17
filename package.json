@@ -1,0 +1,1 @@
+{"name":"awesome-engines","private":true,"version":"0.1.0","type":"module","license":"GPL-3.0-or-later","scripts":{"dev":"python3 -m http.server 4173","test":"node --test test/*.test.mjs","check":"node --check main.mjs && node --check scene.mjs && node --check hermes.mjs && npm test"},"engines":{"node":">=20"}}

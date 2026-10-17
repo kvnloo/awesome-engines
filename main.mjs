@@ -1,0 +1,49 @@
+import { ENGINES,FAMILIES,findEngine } from './catalog.mjs';
+import { samplePhysics,TAU,stepEnergy } from './physics.mjs';
+import { createEngineViewer } from './scene.mjs';
+import { connectHermes } from './hermes.mjs';
+
+const $=id=>document.getElementById(id);
+const safe=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const year=y=>y<100?`c. ${y} CE`:String(y);
+const familyLabel={reaction:'Reaction steam',pump:'Steam pressure',beam:'Atmospheric steam',stirling:'External heat',inline:'Reciprocating',twostroke:'Two-stroke',boxer:'Boxer',radial:'Radial',v8:'V-engine',f1:'Turbo-hybrid',hybrid:'Hybrid',electric:'Electromagnetic',jet:'Gas turbine',turbine:'Steam turbine',rotary:'Rotary'};
+let active=ENGINES[0],family='All',search='',playing=!matchMedia('(prefers-reduced-motion: reduce)').matches,angle=0,rpm=120,throttle=.65,soc=.65,mode='deploy',partId=null,partItems=[],exploded=false,cutaway=true,hermes=null;
+const countText=(n)=>String(n).padStart(2,'0');
+let viewer=null;
+try{
+  viewer=createEngineViewer($('viewport'),{onSelect:id=>selectPart(id,false),onAngle:a=>{angle=a;const deg=Math.round(a*180/Math.PI)%720;$('crank-angle').value=deg;$('angle-output').textContent=`${String(deg).padStart(3,'0')}°`;updateMetrics()}});
+  $('scene-fallback').remove();
+}catch(e){$('scene-fallback').textContent=`3D unavailable: ${e.message}. Engine timeline and sources remain accessible.`;console.error(e)}
+function renderFamilies(){const f=$('families');f.innerHTML=FAMILIES.map(t=>`<button type="button" data-family="${safe(t)}" class="${t===family?'active':''}">${safe(t)}</button>`).join('');f.querySelectorAll('button').forEach(b=>b.onclick=()=>{family=b.dataset.family;renderFamilies();renderTimeline()});}
+function renderTimeline(){const results=ENGINES.filter(e=>(family==='All'||e.family===family)&&`${e.name} ${e.family} ${e.maker} ${e.subtitle} ${e.year}`.toLowerCase().includes(search.toLowerCase()));$('count').textContent=`${countText(results.length)} / ${countText(ENGINES.length)}`;
+  $('engine-list').innerHTML=results.map(e=>`<button type="button" class="engine-item ${active.id===e.id?'active':''}" data-engine="${safe(e.id)}" aria-current="${active.id===e.id?'true':'false'}"><span class="engine-year">${year(e.year)}</span><span class="engine-text"><b>${safe(e.name)}</b><small>${safe(e.family)} · ${safe(familyLabel[e.layout]||e.layout)}</small></span><span class="engine-arrow">${active.id===e.id?'●':'↗'}</span></button>`).join('')||'<p style="color:#7f909b;padding:18px">No matching engines.</p>';
+  $('engine-list').querySelectorAll('[data-engine]').forEach(btn=>btn.onclick=()=>openEngine(btn.dataset.engine));}
+function sceneParts(){if(viewer){partItems=viewer.build(active)}else{partItems=active.parts.map((label,i)=>({id:`part-${i}`,label,description:'Physical properties will become available when the 3D engine is running.'}))}partId=null;renderParts();}
+function renderParts(){const container=$('parts');$('part-count').textContent=`${partItems.length} PARTS`;container.innerHTML=partItems.map((p,i)=>`<button type="button" class="part-row ${p.id===partId?'selected':''}" data-part="${safe(p.id)}"><span><i></i>${safe(p.label)}</span><b>${String(i+1).padStart(2,'0')}</b></button>`).join('');container.querySelectorAll('button').forEach(b=>b.onclick=()=>selectPart(b.dataset.part,true));const p=partItems.find(p=>p.id===partId);$('part-name').textContent=p?.label||'Complete assembly';$('part-description').textContent=p?.description||'Choose a component to inspect its geometry and role in the energy pathway.';$('focus-part').disabled=!p;$('isolate-part').disabled=!p;$('isolate-part').textContent=viewer?.isolated?'SHOW ALL':'ISOLATE';}
+function selectPart(id,focus){partId=id||null;if(viewer){viewer.select(partId,Boolean(focus));}renderParts();}
+function eraText(y){return y<1500?'CLASSICAL ANTIQUITY':y<1800?'EARLY INDUSTRIAL REVOLUTION':y<1900?'INDUSTRIAL AGE':y<1950?'MECHANICAL MODERNITY':y<2000?'ELECTRIFICATION & AEROSPACE':'CONTEMPORARY POWER'}
+function openEngine(id){active=findEngine(id);let index=ENGINES.indexOf(active)+1;history.replaceState(null,'',`#${encodeURIComponent(active.id)}`);$('selected-era').textContent=`${countText(index)} / ${eraText(active.year)}`;$('engine-title').textContent=active.name;$('engine-subtitle').textContent=active.subtitle;$('engine-date').textContent=year(active.year);$('engine-maker').textContent=active.maker;$('principle').textContent=active.principle;$('source-link').href=active.source;
+  rpm=active.id==='f1-2026'?4500:active.family==='Electric'?1800:active.layout==='reaction'?120:active.layout==='jet'?3000:600;$('rpm').max=active.id.startsWith('f1')?15000:active.family==='Turbine'?12000:9000;$('rpm').value=rpm;$('rpm-output').textContent=`${rpm.toLocaleString()} RPM`;$('throttle').value=Math.round(throttle*100);
+  soc=.65;angle=0;$('crank-angle').value=0;$('angle-output').textContent='000°';exploded=false;$('toggle-explode').classList.remove('active');$('toggle-explode').setAttribute('aria-pressed','false');if(viewer){viewer.setRPM(rpm);sceneParts();viewer.setPlaying(playing);}else sceneParts();updateMetrics();renderTimeline();}
+let sampleTicks=0,lastSampleTime=0;
+function updateMetrics(){const now=performance.now();if(now-lastSampleTime<80)return;lastSampleTime=now;const p=samplePhysics(active,angle,rpm,throttle,mode,soc),isHybrid=active.family==='Hybrid',isElectric=active.family==='Electric',isSteam=active.family==='Steam';
+  const data=[['CURRENT PROCESS',p.state,'MODELLED PHASE'],['WORKING PRESSURE',`${p.pressure.toFixed(1)} bar`,'ILLUSTRATIVE'],['GAS TEMPERATURE',`${Math.round(p.temperature)} K`,'ILLUSTRATIVE'],[isHybrid?'ELECTRIC CONTRIBUTION':isElectric?'MOTOR POWER':isSteam?'HEAT-ENGINE TYPE':'CRANK POSITION',isHybrid||isElectric?`${Math.round(p.motorKw)} kW`:isSteam?'STEAM':`${Math.round(p.deg)}°`,isHybrid?'PUBLIC RULES ENVELOPE':isElectric?'DEMO SCENARIO':isSteam?'MECHANISM':'0—720°']];
+  $('metrics').innerHTML=data.map(([label,value,sub])=>`<div class="metric"><span class="metric-label">${safe(label)}</span><strong>${safe(value)}</strong><small>${safe(sub)}</small></div>`).join('');
+}
+$('search').addEventListener('input',e=>{search=e.target.value;renderTimeline()});
+$('play').onclick=()=>{playing=!playing;viewer?.setPlaying(playing);$('play').textContent=playing?'❚❚':'▶';$('play').setAttribute('aria-label',playing?'Pause animation':'Play animation')};
+$('rpm').oninput=e=>{rpm=Number(e.target.value);viewer?.setRPM(rpm);$('rpm-output').textContent=`${rpm.toLocaleString()} RPM`;updateMetrics()};
+$('throttle').oninput=e=>{throttle=Number(e.target.value)/100;$('throttle-output').textContent=`${Math.round(throttle*100)}%`;updateMetrics()};
+$('crank-angle').oninput=e=>{if(playing)$('play').click();const d=Number(e.target.value);viewer?.setAngle(d);angle=d*Math.PI/180;$('angle-output').textContent=`${String(d).padStart(3,'0')}°`;updateMetrics()};
+$('reset-camera').onclick=()=>viewer?.frameAssembly();
+$('toggle-explode').onclick=()=>{exploded=!exploded;viewer?.setExplode(exploded);$('toggle-explode').classList.toggle('active',exploded);$('toggle-explode').setAttribute('aria-pressed',String(exploded))};
+$('toggle-cutaway').onclick=()=>{cutaway=!cutaway;viewer?.setCutaway(cutaway);$('toggle-cutaway').classList.toggle('active',cutaway);$('toggle-cutaway').setAttribute('aria-pressed',String(cutaway))};
+$('focus-part').onclick=()=>partId&&viewer?.focus(partId);
+$('isolate-part').onclick=()=>{if(partId&&viewer){viewer.isolate(!viewer.isolated);renderParts()}};
+$('clear-part').onclick=()=>{viewer?.isolate(false);selectPart(null);viewer?.frameAssembly();renderParts()};
+$('hermes-toggle').onclick=()=>{$('hermes-drawer').hidden=!$('hermes-drawer').hidden};$('close-hermes').onclick=()=>{$('hermes-drawer').hidden=true};
+function chat(role,text){const el=document.createElement('div');el.className=`chat-msg ${role}`;el.textContent=text;$('hermes-conversation').appendChild(el);el.scrollIntoView({block:'end'});return el}
+$('connect-hermes').onclick=async()=>{const state=$('hermes-state');try{hermes?.close();state.textContent='Connecting…';const token=$('bridge-token').value.trim();hermes=connectHermes({bridge:$('bridge-url').value.trim(),token,onUpdate:u=>{if(u?.sessionUpdate==='agent_message_chunk'&&u.content?.type==='text'){if(window.__lastHermesChunk){window.__lastHermesChunk.textContent+=u.content.text||''}else window.__lastHermesChunk=chat('agent',u.content.text||'')}},onStatus:s=>{state.textContent=s}});await hermes.start();state.textContent='Hermes connected (read-only UI). Agent permission requests are denied.';$('bridge-status').classList.add('online');$('bridge-status').lastChild.textContent='HERMES CONNECTED';$('bridge-token').value='';}catch(e){state.textContent=e.message;$('bridge-status').classList.remove('online');console.error(e)}};
+async function sendHermes(){const input=$('hermes-question');const q=input.value.trim();if(!q||!hermes||hermes.closed){$('hermes-state').textContent='Connect Hermes through the local bridge first.';return}input.value='';chat('user',q);window.__lastHermesChunk=null;const part=partItems.find(p=>p.id===partId);const context=`Engine: ${active.name} (${active.year}). Source: ${active.source}. Mechanism: ${active.principle}. ${part?`Selected part: ${part.label}. ${part.description}`:''} Viewer uses educational reconstructions, not validated CAD. User question: ${q}`;try{await hermes.prompt(context)}catch(e){chat('agent',`Hermes error: ${e.message}`)}}
+$('send-hermes').onclick=sendHermes;$('hermes-question').onkeydown=e=>{if(e.key==='Enter')sendHermes()};
+renderFamilies();openEngine(decodeURIComponent(location.hash.slice(1))||ENGINES[0].id);$('play').textContent=playing?'❚❚':'▶';viewer?.setPlaying(playing);
