@@ -1,4 +1,4 @@
-name: Engine Atlas — GitHub Pages
+name: Verify Engine Atlas on GitHub Pages
 
 on:
   push:
@@ -7,66 +7,43 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: github-pages
-  cancel-in-progress: false
 
 jobs:
-  build:
-    name: Check and package static site
+  verify:
+    name: Tests and live GitHub Pages smoke test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Check JavaScript and run regression tests
+      - name: Run JavaScript checks and regression tests
         run: npm run check
-      - name: Package only the public site files
-        run: |
-          mkdir -p _site
-          cp index.html style.css main.mjs catalog.mjs physics.mjs scene.mjs hermes.mjs _site/
-          touch _site/.nojekyll
-          test -s _site/index.html
-          test -s _site/main.mjs
-      - name: Upload GitHub Pages artifact
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: _site
-
-  deploy:
-    name: Deploy and smoke-test live URL
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-      - name: Verify the public site and JavaScript assets
+      - name: Check published HTML and every local asset
         env:
-          PAGES_URL: ${{ steps.deployment.outputs.page_url }}
+          SITE: https://kvnloo.github.io/awesome-engines/
         shell: bash
         run: |
           set -euo pipefail
-          echo "Checking ${PAGES_URL}"
+          echo "Checking live site: ${SITE}"
           for attempt in $(seq 1 30); do
-            if curl --fail --location --silent --show-error --max-time 20 "${PAGES_URL}" -o /tmp/engine-atlas-index.html \
-              && grep -q 'Engine Atlas' /tmp/engine-atlas-index.html \
-              && curl --fail --location --silent --show-error --max-time 20 "${PAGES_URL%/}/main.mjs" -o /dev/null \
-              && curl --fail --location --silent --show-error --max-time 20 "${PAGES_URL%/}/scene.mjs" -o /dev/null; then
-              echo "Live Pages smoke test passed: ${PAGES_URL}"
-              exit 0
+            if curl --fail --location --silent --show-error --max-time 20 "${SITE}" -o /tmp/engine-atlas-index.html \
+                && grep -q '<title>Engine Atlas' /tmp/engine-atlas-index.html; then
+              break
             fi
-            echo "Not live yet (attempt ${attempt}/30); retrying"
+            if [ "${attempt}" -eq 30 ]; then
+              echo "::error::The live GitHub Pages URL did not serve Engine Atlas"
+              exit 1
+            fi
+            echo "Site not ready yet (${attempt}/30), retrying..."
             sleep 10
           done
-          echo "::error::GitHub Pages did not serve the expected HTML and module assets"
-          exit 1
+          for filename in index.html style.css main.mjs catalog.mjs physics.mjs scene.mjs hermes.mjs; do
+            echo "Verifying ${filename}"
+            curl --fail --location --silent --show-error --max-time 30 "${SITE}${filename}" -o "/tmp/${filename}"
+            if ! cmp -s "${filename}" "/tmp/${filename}"; then
+              echo "::error::Live ${filename} does not match main. Sync main to the gh-pages publishing branch."
+              exit 1
+            fi
+          done
+          echo "All published files match main. Site: ${SITE}"
